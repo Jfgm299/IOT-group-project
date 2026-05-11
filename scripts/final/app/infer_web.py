@@ -26,6 +26,9 @@ from features import landmarks_to_feature_vector
 from mediapipe_utils import HandLandmarkerWrapper, draw_landmarks
 
 
+# Game's logic
+from game import match
+
 def stable_vote(values: deque[str]) -> str:
     if not values:
         return "-"
@@ -189,6 +192,7 @@ class InferenceState:
         self.lock = threading.Lock()
         self.jpeg: bytes | None = None
         self.status = "Starting..."
+        self.current_label = "-" # < -- (Mateo) to read dectentios
         self.stopped = False
 
 
@@ -293,6 +297,7 @@ def inference_loop(args: argparse.Namespace, state: InferenceState) -> None:
                 with state.lock:
                     state.jpeg = buffer.tobytes()
                     state.status = status
+                    state.current_label = label # <-- (Mateo)
     finally:
         detector.close()
         close_classifier = getattr(classifier, "close", None)
@@ -301,7 +306,7 @@ def inference_loop(args: argparse.Namespace, state: InferenceState) -> None:
         camera.release()
 
 
-def make_handler(state: InferenceState):
+def make_handler(state: InferenceState): # Changes by Mateo: Added handler to send the current detection back to the script to play the game
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path in {"/", "/index.html"}:
@@ -311,10 +316,26 @@ def make_handler(state: InferenceState):
 <!doctype html>
 <html>
 <head><title>Gesture Inference</title></head>
-<body style="margin:0;background:#111;color:white;font-family:sans-serif;text-align:center">
+<body style="margin:0;background:#111;colorstatus:white;font-family:sans-serif;text-align:center">
   <h2>Gesture Inference</h2>
   <p style="margin:0 0 12px 0;color:#ccc">{status}</p>
   <img src="/stream.mjpg" style="max-width:100vw;max-height:82vh" />
+  <div id="detection-log" style="margin-top:20px; font-size: 24px; color: #00ff00; font-weight: bold;">
+    Press Space to Log Detection
+  </div>
+  <script>
+    // Note the double curly braces below for the f-string to ignore them
+    document.addEventListener('keydown', function(event) {{
+      if (event.code === 'Space') {{
+        event.preventDefault(); // Stop page from scrolling
+        fetch('/current_detection')
+          .then(response => response.json())
+          .then(data => {{
+            document.getElementById('detection-log').innerText = "Logged: " + data.gesture;
+          }});
+      }}
+    }});
+  </script>
 </body>
 </html>
 """.encode("utf-8")
@@ -323,6 +344,27 @@ def make_handler(state: InferenceState):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+                return
+            
+            if self.path == "/current_detection": # (Mateo)
+                with state.lock:
+                    current = state.current_label
+                
+                if current != "-":
+                    try:
+                        game_result = match(current, cpu_level= 1) # Get the game result from game.py
+                        display_text = f"Gesture: {current} | Result: {game_result}"
+                    except Exception as e:
+                        display_text = f"Error in match {str(e)}"
+                else:
+                    display_text = "No hand detected"
+    
+                response_data = json.dumps({"gesture": display_text}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(response_data)))
+                self.end_headers()
+                self.wfile.write(response_data)
                 return
 
             if self.path != "/stream.mjpg":
@@ -369,7 +411,7 @@ def main() -> None:
     parser.add_argument("--landmark-refresh", type=int, default=10, help="Frames between MediaPipe ROI refreshes when landmarks use Hailo.")
     parser.add_argument("--roi-padding", type=float, default=1.0, help="Padding around the hand crop used by the Hailo landmark model.")
     parser.add_argument("--hailo-python", default="python3", help="System Python that can import hailo_platform.")
-    parser.add_argument("--camera-source", choices=["auto", "picamera2", "rpicam", "opencv"], default="rpicam")
+    parser.add_argument("--camera-source", choices=["auto", "picamera2", "rpicam", "opencv"], default="opencv")
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)

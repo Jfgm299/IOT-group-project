@@ -11,6 +11,7 @@ This folder contains a self-contained web inference pipeline for Raspberry Pi + 
 - `app/features.py`: converts hand landmarks into the 63-value classifier input.
 - `app/classifiers.py`: loads the sklearn `gesture_model.joblib` classifier.
 - `app/gestures.py`: label definitions.
+- `app/game.py`: game rules and match logic
 - `workers/hailo_hand_worker.py`: Hailo worker for `hand_landmark_lite.hef`.
 - `workers/hailo_gesture_worker.py`: optional Hailo worker for a future gesture-classifier HEF.
 - `models/gesture_model.joblib`: trained gesture classifier.
@@ -72,3 +73,4 @@ python main.py \
 - The gesture classifier is currently `gesture_model.joblib`, which runs on CPU and is lightweight.
 - `hailo_gesture_worker.py` is included for future use if a 63-feature gesture classifier is compiled to HEF.
 - Do not commit virtual environments such as `.venv`, `.venv311`, or `venv`.
+- (Mateo) To make it work in laptop, change i `infer_web.py` line 372 default to opencv
