@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import requests
 
 APP_DIR = Path(__file__).resolve().parent
 FINAL_DIR = APP_DIR.parent
@@ -193,6 +194,8 @@ class InferenceState:
         self.jpeg: bytes | None = None
         self.status = "Starting..."
         self.current_label = "-" # < -- (Mateo) to read dectentios
+        self.streak = 0 # < -- (Mateo) to save streak in backend
+        self.last_score = 0 # < -- (Mateo) to send streak to database
         self.stopped = False
 
 
@@ -321,9 +324,31 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
   <p style="margin:0 0 12px 0;color:#ccc">{status}</p>
   <img src="/stream.mjpg" style="max-width:100vw;max-height:82vh" />
   <div id="detection-log" style="margin-top:20px; font-size: 24px; color: #00ff00; font-weight: bold;">
-    Press Space to Log Detection
+    Press Space to play match
   </div>
+  <div id="save-score-area" style="display:none; margin-top: 20px;">
+    <input type="text" id="player-code" maxlength="3" placeholder="AAA" style="text-transform:uppercase; font-size: 20px; width: 60px; text-align: center;">
+    <button onclick="sendCode()" style="font-size: 20px; cursor: pointer;">Send</button>
+  </div>
+
   <script>
+    let lastStreak = 0;
+
+    function sendCode(){{
+        const code = document.getElementById('player-code').value;
+        if (code.length !== 3) {{
+            alert("Code must be 3 characters!");
+            return;
+        }}
+        fetch('/save_code?code=' + encodeURIComponent(code))
+            .then(() => {{
+                document.getElementById('save-score-area').style.display = 'none';
+                document.getElementById('player-code').value = '';
+                alert("Code saved!");
+            }});
+
+    }}
+
     // Note the double curly braces below for the f-string to ignore them
     document.addEventListener('keydown', function(event) {{
       if (event.code === 'Space') {{
@@ -331,7 +356,12 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
         fetch('/current_detection')
           .then(response => response.json())
           .then(data => {{
-            document.getElementById('detection-log').innerText = "Logged: " + data.gesture;
+            const logDiv = document.getElementById('detection-log');
+            logDiv.innerText = data.display_text + " | Streak: " + data.streak;
+                    
+            if (data.last_score > 0) {{
+                document.getElementById('save-score-area').style.display = 'block';
+            }}
           }});
       }}
     }});
@@ -346,6 +376,42 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
                 self.wfile.write(body)
                 return
             
+            if self.path.startswith("/save_code"):
+                # Simple way to parse the ?code=AAA part of the URL
+                from urllib.parse import urlparse, parse_qs
+                query_components = parse_qs(urlparse(self.path).query)
+                code = query_components.get("code", ["???"])[0]
+
+                with state.lock:
+                    final_score = state.last_score
+                    state.last_score = 0 # Reset streak after saving
+                
+                print(f"PLAYER LOGGED CODE: [{code}] with streak: {final_score}") # This prints in your terminal
+
+                database_api_url = "http://mateodonado.local:8000/statistics"
+                payload = {
+                    "username": code,
+                    "streak": final_score
+                }
+
+                try:
+                    # We send a POST request to your database backend
+                    # Using a timeout=3 ensures your local camera feed doesn't freeze if the DB is slow
+                    response = requests.post(database_api_url, json=payload, timeout=3)
+        
+                    if response.status_code == 201 or response.status_code == 200:
+                        print(f"Successfully synced {code}'s score to database.")
+                    else:
+                        print(f"Database rejected score: {response.status_code}")
+                except Exception as e:
+                    print(f"Failed to connect to database backend: {e}")
+
+
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"OK")
+                return
+            
             if self.path == "/current_detection": # (Mateo)
                 with state.lock:
                     current = state.current_label
@@ -353,13 +419,30 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
                 if current != "-":
                     try:
                         game_result = match(current, cpu_level= 1) # Get the game result from game.py
+
+                        if game_result == 'Player':
+                            state.streak += 1
+                        elif game_result == 'AI':
+
+                            state.last_score = state.streak # Save streak to send to database
+                            state.streak = 0
+                        
                         display_text = f"Gesture: {current} | Result: {game_result}"
                     except Exception as e:
                         display_text = f"Error in match {str(e)}"
+                        game_result = "Error"
                 else:
                     display_text = "No hand detected"
+                    game_result = "-"
+                
+                streak = state.streak
+                    
     
-                response_data = json.dumps({"gesture": display_text}).encode("utf-8")
+                response_data = json.dumps({"gesture": current,
+                                             "result": game_result,
+                                             "display_text": display_text,
+                                             "streak": streak,
+                                             "last_score": state.last_score }).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(response_data)))
