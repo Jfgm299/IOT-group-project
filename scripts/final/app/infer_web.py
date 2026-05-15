@@ -29,6 +29,8 @@ from mediapipe_utils import HandLandmarkerWrapper, draw_landmarks
 
 # Game's logic
 from game import match
+# Bluetooth communication to Pico
+from pico_ble import send_data
 
 def stable_vote(values: deque[str]) -> str:
     if not values:
@@ -196,6 +198,7 @@ class InferenceState:
         self.current_label = "-" # < -- (Mateo) to read dectentios
         self.streak = 0 # < -- (Mateo) to save streak in backend
         self.last_score = 0 # < -- (Mateo) to send streak to database
+        self.send_status = True # < -- (Mateo) to verify that the data was sent to the pico
         self.stopped = False
 
 
@@ -311,7 +314,7 @@ def inference_loop(args: argparse.Namespace, state: InferenceState) -> None:
 
 def make_handler(state: InferenceState): # Changes by Mateo: Added handler to send the current detection back to the script to play the game
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
+        def do_GET(self) -> None: 
             if self.path in {"/", "/index.html"}:
                 with state.lock:
                     status = state.status
@@ -325,6 +328,9 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
   <img src="/stream.mjpg" style="max-width:100vw;max-height:82vh" />
   <div id="detection-log" style="margin-top:20px; font-size: 24px; color: #00ff00; font-weight: bold;">
     Press Space to play match
+  </div>
+  <div id="bluetooth-status" style="margin-top:20px; font-size: 24px; color: #00ff00; font-weight: bold;">
+    Send status to the pico: -
   </div>
   <div id="save-score-area" style="display:none; margin-top: 20px;">
     <input type="text" id="player-code" maxlength="3" placeholder="AAA" style="text-transform:uppercase; font-size: 20px; width: 60px; text-align: center;">
@@ -358,6 +364,9 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
           .then(data => {{
             const logDiv = document.getElementById('detection-log');
             logDiv.innerText = data.display_text + " | Streak: " + data.streak;
+
+            const statusDisplay = document.getElementById('bluetooth-status');
+            statusDisplay.innerText = "Send status to the pico: " + data.send_status;  
                     
             if (data.last_score > 0) {{
                 document.getElementById('save-score-area').style.display = 'block';
@@ -418,7 +427,22 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
                 
                 if current != "-":
                     try:
-                        game_result = match(current, cpu_level= 1) # Get the game result from game.py
+                        game_result, cpu_choice = match(current, cpu_level= 1) # Get the game result from game.py
+
+                        # --- BRIDGE SYNC TO ASYNC HERE ---
+                        import asyncio
+                        try:
+                            # We use asyncio.run to execute the async function inside this sync block
+                            send_result = asyncio.run(send_data(cpu_choice))
+                        except Exception as ble_err:
+                            print(f"Bluetooth transmission failed: {ble_err}")
+                            send_result = False
+                        # ----------------------------------
+
+                        if send_result:
+                            state.send_status = True
+                        else:
+                            state.send_status = False
 
                         if game_result == 'Player':
                             state.streak += 1
@@ -436,12 +460,14 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
                     game_result = "-"
                 
                 streak = state.streak
+                send_status = state.send_status
                     
     
                 response_data = json.dumps({"gesture": current,
                                              "result": game_result,
                                              "display_text": display_text,
                                              "streak": streak,
+                                             "send_status": send_status,
                                              "last_score": state.last_score }).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -494,7 +520,7 @@ def main() -> None:
     parser.add_argument("--landmark-refresh", type=int, default=10, help="Frames between MediaPipe ROI refreshes when landmarks use Hailo.")
     parser.add_argument("--roi-padding", type=float, default=1.0, help="Padding around the hand crop used by the Hailo landmark model.")
     parser.add_argument("--hailo-python", default="python3", help="System Python that can import hailo_platform.")
-    parser.add_argument("--camera-source", choices=["auto", "picamera2", "rpicam", "opencv"], default="opencv")
+    parser.add_argument("--camera-source", choices=["auto", "picamera2", "rpicam", "opencv"], default="rpicam")
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)

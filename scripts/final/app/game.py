@@ -38,7 +38,7 @@ def match(player_choice, cpu_level: int = 1):
     else:
         result = "Draw"
 
-    return result
+    return (result, cpu_choice)
 
 if __name__ == "__main__":
     while True:

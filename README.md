@@ -73,4 +73,4 @@ python main.py \
 - The gesture classifier is currently `gesture_model.joblib`, which runs on CPU and is lightweight.
 - `hailo_gesture_worker.py` is included for future use if a 63-feature gesture classifier is compiled to HEF.
 - Do not commit virtual environments such as `.venv`, `.venv311`, or `venv`.
-- (Mateo) To make it work in laptop, change i `infer_web.py` line 372 default to opencv
+- (Mateo) To make it work in laptop, change  `infer_web.py` line 497 default to opencv
