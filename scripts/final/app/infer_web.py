@@ -321,7 +321,31 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
                 body = f"""
 <!doctype html>
 <html>
-<head><title>Gesture Inference</title></head>
+<head>
+<title>Gesture Inference</title>
+<style>
+  /* Simple spinning loading ring */
+  .loader {{
+      border: 4px solid #333;
+      border-top: 4px solid #00ff00;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 10px;
+    }}
+    @keyframes spin {{
+      0% {{ transform: rotate(0deg); }}
+      100% {{ transform: rotate(360deg); }}
+    }}
+    .loading-text {{
+      color: #ffaa00 !important;
+      opacity: 0.7;
+    }}
+</style>
+</head>
 <body style="margin:0;background:#111;colorstatus:white;font-family:sans-serif;text-align:center">
   <h2>Gesture Inference</h2>
   <p style="margin:0 0 12px 0;color:#ccc">{status}</p>
@@ -339,6 +363,7 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
 
   <script>
     let lastStreak = 0;
+    let isProcessing = false;
 
     function sendCode(){{
         const code = document.getElementById('player-code').value;
@@ -359,10 +384,25 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
     document.addEventListener('keydown', function(event) {{
       if (event.code === 'Space') {{
         event.preventDefault(); // Stop page from scrolling
+
+        //IF ALREADY LOADING, DO NOTHING AND RETURN
+        if(isProcessing){{
+            return;
+        }}
+
+        isProcessing = true; // Set flag to true to lock the spacebar
+
+        const logDiv = document.getElementById('detection-log');
+        logDiv.innerHTML = '<div class="loader"></div> Calculating match...';
+        logDiv.className = "loading-text";
+
         fetch('/current_detection')
           .then(response => response.json())
           .then(data => {{
-            const logDiv = document.getElementById('detection-log');
+          
+            // Restore to normal
+            logDiv.className = "";
+            logDiv.style.color = "#00ff00";
             logDiv.innerText = data.display_text + " | Streak: " + data.streak;
 
             const statusDisplay = document.getElementById('bluetooth-status');
@@ -371,6 +411,15 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
             if (data.last_score > 0) {{
                 document.getElementById('save-score-area').style.display = 'block';
             }}
+          }})
+          .catch(err => {{
+            logDiv.style.color = "#ff0000";
+            logDiv.innerText = "Error fetching detection.";
+            console.error(err);
+          }})
+          .finally(() => {{
+            // ALWAYS unlock the spacebar when the request finishes (success or failure)
+            isProcessing = false;
           }});
       }}
     }});
@@ -520,7 +569,7 @@ def main() -> None:
     parser.add_argument("--landmark-refresh", type=int, default=10, help="Frames between MediaPipe ROI refreshes when landmarks use Hailo.")
     parser.add_argument("--roi-padding", type=float, default=1.0, help="Padding around the hand crop used by the Hailo landmark model.")
     parser.add_argument("--hailo-python", default="python3", help="System Python that can import hailo_platform.")
-    parser.add_argument("--camera-source", choices=["auto", "picamera2", "rpicam", "opencv"], default="rpicam")
+    parser.add_argument("--camera-source", choices=["auto", "picamera2", "rpicam", "opencv"], default="opencv")
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
