@@ -344,6 +344,10 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
       color: #ffaa00 !important;
       opacity: 0.7;
     }}
+    button:disabled {{
+  opacity: 0.5;
+  cursor: not-allowed;
+    }}
 </style>
 </head>
 <body style="margin:0;background:#111;colorstatus:white;font-family:sans-serif;text-align:center">
@@ -363,20 +367,50 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
 
   <script>
     let lastStreak = 0;
-    let isProcessing = false;
+    let isProcessing = false; // Flag for spacebar/detections
+    let isSavingCode = false; // Flag for database submissions
 
     function sendCode(){{
-        const code = document.getElementById('player-code').value;
+        
+        if(isSavingCode) return;    
+
+        const codeInput = document.getElementById('player-code')
+        const sendButton = codeInput.nextElementSibling;
+        const code = codeInput.value;
+
         if (code.length !== 3) {{
             alert("Code must be 3 characters!");
             return;
         }}
+
+        isSavingCode = true;
+        sendButton.disabled = true;
+        const originalButtonText = sendButton.innerText;
+        sendButton.innerText = "Saving...";
+
         fetch('/save_code?code=' + encodeURIComponent(code))
+            .then(response => {{
+                // Manually force HTTP errors (like 500) to jump to the .catch() block
+                if (!response.ok) {{
+                    throw new Error("Server responded with an error status: " + response.status);
+                }}
+                return response.json();
+            }})
             .then(() => {{
                 document.getElementById('save-score-area').style.display = 'none';
                 document.getElementById('player-code').value = '';
                 alert("Code saved!");
-            }});
+            }})
+            .catch(err => {{
+                alert("Failed to save code to server.");
+                console.error(err);
+            }})
+            .finally(() => {{
+                // ALWAYS unlock the state and restore button text
+                isSavingCode = false;
+                sendButton.disabled = false;
+                sendButton.innerText = originalButtonText;
+            }});;
 
     }}
 
@@ -463,6 +497,10 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
                         print(f"Database rejected score: {response.status_code}")
                 except Exception as e:
                     print(f"Failed to connect to database backend: {e}")
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(b"NOK")
+                    return
 
 
                 self.send_response(200)
