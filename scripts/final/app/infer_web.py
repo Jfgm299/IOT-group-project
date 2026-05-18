@@ -520,7 +520,7 @@ def make_handler(state: InferenceState): # Changes by Mateo: Added handler to se
                         import asyncio
                         try:
                             # We use asyncio.run to execute the async function inside this sync block
-                            send_result = asyncio.run(send_data(cpu_choice))
+                            send_result = asyncio.run(send_data(f"user:{current} | ai: {cpu_choice}"))
                         except Exception as ble_err:
                             print(f"Bluetooth transmission failed: {ble_err}")
                             send_result = False
@@ -607,7 +607,7 @@ def main() -> None:
     parser.add_argument("--landmark-refresh", type=int, default=10, help="Frames between MediaPipe ROI refreshes when landmarks use Hailo.")
     parser.add_argument("--roi-padding", type=float, default=1.0, help="Padding around the hand crop used by the Hailo landmark model.")
     parser.add_argument("--hailo-python", default="python3", help="System Python that can import hailo_platform.")
-    parser.add_argument("--camera-source", choices=["auto", "picamera2", "rpicam", "opencv"], default="opencv")
+    parser.add_argument("--camera-source", choices=["auto", "picamera2", "rpicam", "opencv"], default="rpicam")
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
